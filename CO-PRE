@@ -303,6 +303,15 @@ local function CustomNotify(opts)
         layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Parent = container
+        local uiScale = Instance.new("UIScale")
+        uiScale.Parent = container
+        
+        local camera = workspace.CurrentCamera
+        if camera and camera.ViewportSize.Y < 700 then
+            uiScale.Scale = 0.75 
+        else
+            uiScale.Scale = 1 
+        end
     end
 
     local pill = Instance.new("Frame")
@@ -415,6 +424,14 @@ local function CountdownNotify(label, seconds, callback)
             layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
             layout.SortOrder = Enum.SortOrder.LayoutOrder
             layout.Parent = container
+            local uiScale = Instance.new("UIScale")
+        uiScale.Parent = container
+        
+        local camera = workspace.CurrentCamera
+        if camera and camera.ViewportSize.Y < 700 then
+            uiScale.Scale = 0.75 
+        else
+            uiScale.Scale = 1 
         end
 
         local pill = Instance.new("Frame")
@@ -2485,6 +2502,21 @@ local cascade = loadstring(game:HttpGet("https://github.com/biggaboy212/Cascade/
 local savedAccent = getgenv().ThemeAccent and cascade.Accents[getgenv().ThemeAccent] or cascade.Accents.Blue
 local app     = cascade.New({ Theme = cascade.Themes.Dark, Accent = savedAccent })
 local window  = app:Window({ Title = "Clover Origins [Premium]", Subtitle = "Ghost Hub", Draggable = true, Resizable = true })
+task.spawn(function()
+    local camera = workspace.CurrentCamera
+    if camera and camera.ViewportSize.Y < 700 then
+        local parentGui = (gethui and gethui()) or game:GetService("CoreGui") or PlayerGui
+        task.wait(1)
+        
+        for _, gui in ipairs(parentGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Name ~= "GhostHub_Toggle" and gui.Name ~= "GhostHubNotify" then
+                local scale = Instance.new("UIScale")
+                scale.Scale = 0.75
+                scale.Parent = gui
+            end
+        end
+    end
+end)
 
 local toggleWindow
 local btnGuiObj, btnFrame
@@ -2535,7 +2567,6 @@ local function CreateFloatingIcon()
     if btnGuiObj then pcall(function() btnGuiObj:Destroy() end) end
 
     local parent = (gethui and gethui()) or game:GetService("CoreGui") or PlayerGui
-    local btnSize = 50
 
     btnGuiObj = Instance.new("ScreenGui")
     btnGuiObj.Name = "GhostHub_Toggle"
@@ -2546,7 +2577,15 @@ local function CreateFloatingIcon()
 
     btnFrame = Instance.new("Frame")
     btnFrame.Name = "ToggleButtonContainer"
-    btnFrame.Size = UDim2.new(0, btnSize, 0, btnSize)
+    
+    btnFrame.Size = UDim2.new(0.06, 0, 0.06, 0) 
+    btnFrame.Position = UDim2.new(0.5, -25, 0.1, -25)
+    btnFrame.BackgroundTransparency = 1
+    btnFrame.Parent = btnGuiObj
+
+    local aspect = Instance.new("UIAspectRatioConstraint")
+    aspect.AspectRatio = 1
+    aspect.Parent = btnFrame
     btnFrame.Position = UDim2.new(0.5, -25, 0.1, -25)
     btnFrame.BackgroundTransparency = 1
     btnFrame.Parent = btnGuiObj
