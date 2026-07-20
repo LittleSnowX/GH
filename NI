@@ -1,0 +1,688 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+
+local MainRemote = ReplicatedStorage:WaitForChild("__Net"):WaitForChild("MainRemote")
+
+local Window = Fluent:CreateWindow({
+    Title = "Noob INC.",
+    SubTitle = "made by VOX",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Mine = Window:AddTab({ Title = "Mine", Icon = "pickaxe" }),
+    Main = Window:AddTab({ Title = "Mob Farm", Icon = "swords" }),
+    Enchant = Window:AddTab({ Title = "Enchant", Icon = "sparkles" }),
+    Chest = Window:AddTab({ Title = "Chest", Icon = "box" }),
+    EasyTrial = Window:AddTab({ Title = "Easy Trial", Icon = "shield" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+-- ==========================================
+-- [Variables]
+-- ==========================================
+local mobsPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Mobs")
+local oresPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Ores")
+local noobsPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Noobs")
+
+local SelectedOres = {}
+local AutoMine = false
+
+local SelectedMobs = {}
+local AutoTeleport = false
+
+local AutoEasyTrial = false
+local AutoJoinTime = false
+local AutoLeaveWave = false
+local TargetLeaveWave = 10
+local LastJoinMinute = -1
+local IsJoiningTrial = false
+
+local SelectedNoobToEnchant = nil
+local AutoEnchant = false
+local EnchantsToSkip = {} 
+
+local AllEnchantNames = {
+    "Oof I", "Oof II", "Oof III", 
+    "Speed I", "Speed II", "Speed III", 
+    "Powerful", "Rapid", "Balanced", "Wealth", 
+    "Ethereal", "Deity", "Godly", "Almighty", "Transcendent"
+}
+
+local SelectedChest = "Chest"
+local SelectedChestAmount = 1
+local AutoOpenChest = false
+local AvailableChests = {"Chest", "GoldenChest", "T1TrialChest", "T2TrialChest"}
+local AvailableAmounts = {"1", "5", "10", "25", "100"}
+
+-- ==========================================
+-- [Anti-AFK System] Ultimate Cloud Phone Bypass
+-- ==========================================
+task.spawn(function()
+    pcall(function()
+        for _, connection in ipairs(getconnections(LocalPlayer.Idled)) do
+            if connection["Disable"] then
+                connection:Disable()
+            end
+        end
+    end)
+    
+    LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end)
+
+-- ==========================================
+-- [Helper Functions] GUI Click Simulator
+-- ==========================================
+local function simulateButtonClick(button)
+    if not button then return end
+    
+    if getconnections then
+        for _, connection in ipairs(getconnections(button.MouseButton1Click)) do
+            if connection.Function then
+                connection:Fire()
+            end
+        end
+    elseif firesignal then
+        firesignal(button.MouseButton1Click)
+    end
+end
+
+-- ==========================================
+-- [Helper Functions] Universal Entity Farm (Mobs & Ores)
+-- ==========================================
+local function getEntityHealth(entity)
+    local oresUI = entity:FindFirstChild("OresTopUI")
+    if oresUI then
+        local bar = oresUI:FindFirstChild("Bar")
+        if bar then
+            local healthNode = bar:FindFirstChild("Health")
+            if healthNode then
+                if healthNode:IsA("TextLabel") or healthNode:IsA("TextButton") then
+                    return healthNode.Text
+                elseif healthNode:IsA("StringValue") then
+                    return healthNode.Value
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function parseMaxHPFromText(hpText)
+    if not hpText then return 0 end
+    local text = tostring(hpText)
+    local splitText = string.split(text, "/")
+    local maxHpText = splitText[#splitText] 
+    
+    maxHpText = string.gsub(maxHpText, "%s+", "")
+    maxHpText = string.gsub(maxHpText, ",", "")
+    
+    local multipliers = {
+        K = 1e3, M = 1e6, B = 1e9, T = 1e12,
+        QD = 1e15, QA = 1e15,
+        QN = 1e18, QI = 1e18,
+        SX = 1e21, SP = 1e24,
+        OC = 1e27, NO = 1e30,
+        DE = 1e33, UDE = 1e36,
+        DDE = 1e39, TDE = 1e42,
+        QDE = 1e45, QNDE = 1e48,
+        SXDE = 1e51, SPDE = 1e54,
+        OCDE = 1e57, NODE = 1e60,
+        VG = 1e63
+    }
+    
+    local numStr, suffix = string.match(maxHpText, "([%d%.]+)([a-zA-Z]*)")
+    
+    if numStr then
+        local val = tonumber(numStr) or 0
+        suffix = string.upper(suffix or "")
+        local mult = multipliers[suffix] or 1
+        return val * mult
+    end
+    
+    return 0
+end
+
+local function getEntityMaxHP(targetName, parentPath)
+    local highestFound = 0
+    
+    for _, entity in ipairs(parentPath:GetChildren()) do
+        if entity.Name == targetName then
+            local hpText = getEntityHealth(entity)
+            if hpText and not string.find(tostring(hpText), "Respawning") then
+                local val = parseMaxHPFromText(hpText)
+                if val > highestFound then
+                    highestFound = val
+                end
+            end
+        end
+    end
+    
+    return highestFound > 0 and highestFound or math.huge 
+end
+
+local function getUniqueEntitiesSorted(parentPath)
+    local uniqueCheck = {}
+    local dataList = {}
+    
+    for _, entity in ipairs(parentPath:GetChildren()) do
+        if not uniqueCheck[entity.Name] then
+            uniqueCheck[entity.Name] = true
+            local maxHpValue = getEntityMaxHP(entity.Name, parentPath)
+            table.insert(dataList, {
+                Name = entity.Name,
+                MaxHP = maxHpValue
+            })
+        end
+    end
+    
+    table.sort(dataList, function(a, b)
+        return a.MaxHP < b.MaxHP
+    end)
+    
+    local sortedNames = {}
+    for _, data in ipairs(dataList) do
+        table.insert(sortedNames, data.Name)
+    end
+    
+    return sortedNames
+end
+
+local function isEntityDead(hpText)
+    if not hpText then return true end 
+    local text = tostring(hpText)
+    
+    if string.find(text, "Respawning") then return true end
+    if text == "0" or string.match(text, "^0[a-zA-Z]+$") then return true end
+    if string.match(text, "^0%s*/") then return true end
+    
+    return false
+end
+
+local function getValidOre(targetNamesMap)
+    if not targetNamesMap or type(targetNamesMap) ~= "table" then return nil end
+    
+    local bestOre = nil
+    local highestHP = -1
+    
+    for _, ore in ipairs(oresPath:GetChildren()) do
+        if targetNamesMap[ore.Name] then
+            local hpText = getEntityHealth(ore)
+            if not isEntityDead(hpText) then
+                local currentMaxHP = parseMaxHPFromText(hpText)
+                if currentMaxHP > highestHP then
+                    highestHP = currentMaxHP
+                    bestOre = ore
+                end
+            end
+        end
+    end
+    
+    return bestOre
+end
+
+local function getValidMob(targetNamesMap)
+    if not targetNamesMap or type(targetNamesMap) ~= "table" then return nil end
+    
+    local bestMob = nil
+    local highestHP = -1
+    
+    for _, mob in ipairs(mobsPath:GetChildren()) do
+        if targetNamesMap[mob.Name] then
+            local hpText = getEntityHealth(mob)
+            if not isEntityDead(hpText) then
+                local currentMaxHP = parseMaxHPFromText(hpText)
+                if currentMaxHP > highestHP then
+                    highestHP = currentMaxHP
+                    bestMob = mob
+                end
+            end
+        end
+    end
+    
+    return bestMob
+end
+
+local function getValidTrialMob()
+    local content = workspace:FindFirstChild("__GAME_CONTENT")
+    if not content then return nil end
+    
+    local trials = content:FindFirstChild("Trials")
+    if not trials then return nil end
+    
+    local easyRoom = trials:FindFirstChild("EasyTrialRoom")
+    if not easyRoom then return nil end
+    
+    local trialMobs = easyRoom:FindFirstChild("Mobs")
+    if not trialMobs then return nil end
+
+    for _, mob in ipairs(trialMobs:GetChildren()) do
+        local hpText = getEntityHealth(mob)
+        if not isEntityDead(hpText) then
+            return mob
+        end
+    end
+    return nil
+end
+
+local function checkAutoJoinTime(char)
+    if not AutoJoinTime or not char then return end
+    
+    local currentTime = os.date("*t")
+    local min = currentTime.min
+    local sec = currentTime.sec
+    
+    if ((min == 29 and sec >= 30) or (min == 59 and sec >= 30)) and min ~= LastJoinMinute then
+        LastJoinMinute = min 
+        
+        local touchPart = workspace:FindFirstChild("__GAME_CONTENT")
+            and workspace.__GAME_CONTENT:FindFirstChild("Trials")
+            and workspace.__GAME_CONTENT.Trials:FindFirstChild("EasyTrialRoom")
+            and workspace.__GAME_CONTENT.Trials.EasyTrialRoom:FindFirstChild("__TrialEasyRoom")
+            and workspace.__GAME_CONTENT.Trials.EasyTrialRoom.__TrialEasyRoom:FindFirstChild("TouchPart")
+            
+        if touchPart then
+            IsJoiningTrial = true
+            char:PivotTo(touchPart.CFrame)
+            
+            task.delay(5, function()
+                IsJoiningTrial = false
+            end)
+        end
+    end
+end
+
+local function checkAutoLeaveWave()
+    if not AutoLeaveWave then return end
+    
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+    
+    local waveUI = playerGui:FindFirstChild("FullScreen")
+        and playerGui.FullScreen:FindFirstChild("Popups")
+        and playerGui.FullScreen.Popups:FindFirstChild("TrialUI")
+        and playerGui.FullScreen.Popups.TrialUI:FindFirstChild("Info")
+        and playerGui.FullScreen.Popups.TrialUI.Info:FindFirstChild("WaveCount")
+        
+    if waveUI and waveUI:IsA("TextLabel") then
+        local waveText = waveUI.Text
+        local currentWave = tonumber(string.match(waveText, "%d+")) 
+        
+        if currentWave and currentWave >= TargetLeaveWave then
+            MainRemote:FireServer("LeaveTrial")
+            AutoLeaveWave = false 
+            Fluent:Notify({
+                Title = "Auto Leave",
+                Content = "Left the trial at wave " .. tostring(currentWave),
+                Duration = 3
+            })
+        end
+    end
+end
+
+-- ==========================================
+-- [Helper Functions] Enchant 
+-- ==========================================
+local function getOwnedNoobs()
+    local noobList = {}
+    for _, noob in ipairs(noobsPath:GetChildren()) do
+        table.insert(noobList, noob.Name)
+    end
+    return noobList
+end
+
+local function getWarningEnchantName()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return nil end
+    
+    local enchantsUI = playerGui:FindFirstChild("Enchants")
+    if not enchantsUI then return nil end
+    
+    local mainUI = enchantsUI:FindFirstChild("Main")
+    if not mainUI then return nil end
+    
+    local warning = mainUI:FindFirstChild("Warning")
+    if warning and warning.Visible then
+        local frame = warning:FindFirstChild("Frame")
+        if frame then
+            local enchantNameLabel = frame:FindFirstChild("EnchantName")
+            if enchantNameLabel and enchantNameLabel:IsA("TextLabel") then
+                return string.match(enchantNameLabel.Text, "^%s*(.-)%s*$")
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- ==========================================
+-- UI Component: Mine Tab
+-- ==========================================
+local OreDropdown = Tabs.Mine:AddDropdown("OreDropdown", {
+    Title = "Select Ores (Multi-Select)",
+    Description = "Highest HP selected will be prioritized automatically.",
+    Values = getUniqueEntitiesSorted(oresPath),
+    Multi = true,
+    Default = {},
+})
+
+OreDropdown:OnChanged(function(Value)
+    SelectedOres = Value
+end)
+
+Tabs.Mine:AddButton({
+    Title = "Refresh Ore List",
+    Callback = function()
+        OreDropdown:SetValues(getUniqueEntitiesSorted(oresPath))
+    end
+})
+
+local MineToggle = Tabs.Mine:AddToggle("MineToggle", {
+    Title = "Auto Mine Selected Ores",
+    Default = false
+})
+
+MineToggle:OnChanged(function(Value)
+    AutoMine = Value
+end)
+
+-- ==========================================
+-- UI Component: Mob Farm Tab
+-- ==========================================
+local MobDropdown = Tabs.Main:AddDropdown("MobDropdown", {
+    Title = "Select Mobs (Multi-Select)",
+    Description = "Highest HP selected will be prioritized automatically.",
+    Values = getUniqueEntitiesSorted(mobsPath),
+    Multi = true,
+    Default = {},
+})
+
+MobDropdown:OnChanged(function(Value)
+    SelectedMobs = Value
+end)
+
+Tabs.Main:AddButton({
+    Title = "Refresh Mob List",
+    Callback = function()
+        MobDropdown:SetValues(getUniqueEntitiesSorted(mobsPath))
+    end
+})
+
+local TeleportToggle = Tabs.Main:AddToggle("TeleportToggle", {
+    Title = "Auto Teleport to Mobs",
+    Default = false
+})
+
+TeleportToggle:OnChanged(function(Value)
+    AutoTeleport = Value
+end)
+
+-- ==========================================
+-- UI Component: Enchant Tab
+-- ==========================================
+local NoobDropdown = Tabs.Enchant:AddDropdown("NoobDropdown", {
+    Title = "Select Noob",
+    Values = getOwnedNoobs(),
+    Multi = false,
+    Default = 1,
+})
+
+NoobDropdown:OnChanged(function(Value)
+    SelectedNoobToEnchant = Value
+end)
+
+Tabs.Enchant:AddButton({
+    Title = "Refresh Owned Noobs",
+    Callback = function()
+        NoobDropdown:SetValues(getOwnedNoobs())
+    end
+})
+
+local SkipDropdown = Tabs.Enchant:AddDropdown("SkipDropdown", {
+    Title = "Enchants to Skip (Auto-Roll)",
+    Description = "If the warning pops up with these enchants, it will auto-click Reroll.",
+    Values = AllEnchantNames,
+    Multi = true,
+    Default = {}
+})
+
+SkipDropdown:OnChanged(function(Value)
+    EnchantsToSkip = Value 
+end)
+
+local EnchantToggle = Tabs.Enchant:AddToggle("EnchantToggle", {
+    Title = "Auto Roll Enchant (Ultra Fast)",
+    Default = false
+})
+
+EnchantToggle:OnChanged(function(Value)
+    AutoEnchant = Value
+end)
+
+-- ==========================================
+-- UI Component: Chest Tab
+-- ==========================================
+local ChestTypeDropdown = Tabs.Chest:AddDropdown("ChestTypeDropdown", {
+    Title = "Select Chest Type",
+    Values = AvailableChests,
+    Multi = false,
+    Default = 1,
+})
+
+ChestTypeDropdown:OnChanged(function(Value)
+    SelectedChest = Value
+end)
+
+local ChestAmountDropdown = Tabs.Chest:AddDropdown("ChestAmountDropdown", {
+    Title = "Select Amount",
+    Values = AvailableAmounts,
+    Multi = false,
+    Default = 1,
+})
+
+ChestAmountDropdown:OnChanged(function(Value)
+    SelectedChestAmount = tonumber(Value) or 1
+end)
+
+local ChestToggle = Tabs.Chest:AddToggle("ChestToggle", {
+    Title = "Auto Open Chest",
+    Default = false
+})
+
+ChestToggle:OnChanged(function(Value)
+    AutoOpenChest = Value
+end)
+
+-- ==========================================
+-- UI Component: Easy Trial Tab
+-- ==========================================
+local TrialJoinToggle = Tabs.EasyTrial:AddToggle("TrialJoinToggle", {
+    Title = "Auto Join Easy Trial (XX:29:30 & XX:59:30)",
+    Default = false
+})
+
+TrialJoinToggle:OnChanged(function(Value)
+    AutoJoinTime = Value
+end)
+
+local TrialToggle = Tabs.EasyTrial:AddToggle("TrialToggle", {
+    Title = "Auto Clear Easy Trial",
+    Default = false
+})
+
+TrialToggle:OnChanged(function(Value)
+    AutoEasyTrial = Value
+end)
+
+local LeaveWaveInput = Tabs.EasyTrial:AddInput("LeaveWaveInput", {
+    Title = "Target Wave to Leave",
+    Default = "10",
+    Numeric = true,
+    Finished = true,
+    Callback = function(Value)
+        TargetLeaveWave = tonumber(Value) or 10
+    end
+})
+
+local TrialLeaveToggle = Tabs.EasyTrial:AddToggle("TrialLeaveToggle", {
+    Title = "Auto Leave at Target Wave",
+    Default = false
+})
+
+TrialLeaveToggle:OnChanged(function(Value)
+    AutoLeaveWave = Value
+end)
+
+-- ==========================================
+-- UI Component: Settings Tab & Interface Manager
+-- ==========================================
+Tabs.Settings:AddParagraph({
+    Title = "System Status",
+    Content = "Advanced Anti-AFK is ACTIVE. Cloud Phone optimization enabled."
+})
+
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+-- Build settings UI
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+InterfaceManager:SetFolder("NoobINC")
+SaveManager:SetFolder("NoobINC/config")
+
+InterfaceManager:SetWindow(Window)
+SaveManager:SetWindow(Window)
+
+-- Auto load config if available
+SaveManager:LoadAutoloadConfig()
+
+-- ==========================================
+-- Main Loop 1: Core Combat, Mining & Trial System
+-- ==========================================
+task.spawn(function()
+    while task.wait() do 
+        local char = LocalPlayer.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
+
+        checkAutoJoinTime(char)
+        checkAutoLeaveWave()
+
+        if IsJoiningTrial then continue end
+
+        local targetTrialMob = nil
+        if AutoEasyTrial then
+            targetTrialMob = getValidTrialMob()
+        end
+
+        if targetTrialMob then
+            char:PivotTo(targetTrialMob:GetPivot())
+            
+            while AutoEasyTrial and targetTrialMob.Parent do
+                local hpText = getEntityHealth(targetTrialMob)
+                if isEntityDead(hpText) then break end
+                task.wait()
+            end
+            
+        elseif AutoMine and SelectedOres then
+            local targetOre = getValidOre(SelectedOres)
+            
+            if targetOre then
+                char:PivotTo(targetOre:GetPivot())
+                
+                while AutoMine and targetOre.Parent do
+                    local hpText = getEntityHealth(targetOre)
+                    if isEntityDead(hpText) then break end
+                    task.wait()
+                end
+            end
+
+        elseif AutoTeleport and SelectedMobs then
+            local targetMob = getValidMob(SelectedMobs)
+            
+            if targetMob then
+                char:PivotTo(targetMob:GetPivot())
+                
+                while AutoTeleport and targetMob.Parent do
+                    local hpText = getEntityHealth(targetMob)
+                    if isEntityDead(hpText) then break end
+                    task.wait()
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- Main Loop 2: Independent Enchant Fast Spammer
+-- ==========================================
+task.spawn(function()
+    while task.wait() do
+        if AutoEnchant and SelectedNoobToEnchant then
+            local currentWarningEnchant = getWarningEnchantName()
+            
+            if currentWarningEnchant then
+                if EnchantsToSkip[currentWarningEnchant] then
+                    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+                    if playerGui then
+                        local warningFrame = playerGui:FindFirstChild("Enchants")
+                            and playerGui.Enchants:FindFirstChild("Main")
+                            and playerGui.Enchants.Main:FindFirstChild("Warning")
+                            and playerGui.Enchants.Main.Warning:FindFirstChild("Frame")
+                            
+                        if warningFrame then
+                            local buttonsFolder = warningFrame:FindFirstChild("Buttons")
+                            if buttonsFolder then
+                                local rerollBtn = buttonsFolder:FindFirstChild("Reroll")
+                                if rerollBtn then
+                                    simulateButtonClick(rerollBtn)
+                                    task.wait(0.2) 
+                                end
+                            end
+                        end
+                    end
+                else
+                    AutoEnchant = false
+                    EnchantToggle:SetValue(false) 
+                    
+                    Fluent:Notify({
+                        Title = "Enchant Found!",
+                        Content = "Stopped rolling on: " .. currentWarningEnchant,
+                        Duration = 5
+                    })
+                end
+            else
+                MainRemote:FireServer("RollNoobEnchant", SelectedNoobToEnchant)
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- Main Loop 3: Independent Chest Opener
+-- ==========================================
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoOpenChest and SelectedChest and SelectedChestAmount then
+            MainRemote:FireServer("OpenChest", SelectedChest, SelectedChestAmount)
+        end
+    end
+end)
+
+Window:SelectTab(1)
