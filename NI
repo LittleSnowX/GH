@@ -5,6 +5,8 @@ local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
 local NetFolder = ReplicatedStorage:WaitForChild("__Net", 10)
@@ -30,6 +32,94 @@ local Tabs = {
     Misc = Window:AddTab({ Title = "Misc", Icon = "map-pin" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
+
+-- ==========================================
+-- [Mobile Toggle Button] ระบบปุ่มลอยสำหรับมือถือ (แก้บัครูปดำ)
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+local ToggleBtn = Instance.new("TextButton")
+local UICorner = Instance.new("UICorner")
+local UIStroke = Instance.new("UIStroke")
+local UIGradient = Instance.new("UIGradient")
+
+ScreenGui.Name = "MobileToggleINC"
+ScreenGui.Parent = pcall(function() return CoreGui end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+ToggleBtn.Parent = ScreenGui
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+ToggleBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
+ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
+ToggleBtn.Text = "⚡" -- ใช้ Emoji แทนการโหลดรูปภาพ โหลดติด 100%
+ToggleBtn.TextSize = 25
+ToggleBtn.AutoButtonColor = false
+
+UICorner.CornerRadius = UDim.new(0.5, 0) -- ทำให้เป็นวงกลม
+UICorner.Parent = ToggleBtn
+
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Thickness = 2.5
+UIStroke.Transparency = 0.1
+UIStroke.Parent = ToggleBtn
+
+-- ใส่ลูกเล่นไล่สี (Gradient) ให้ขอบปุ่มดูเป็นแนว Sci-fi/อวกาศ
+UIGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 200, 255))
+}
+UIGradient.Rotation = 45
+UIGradient.Parent = UIStroke
+
+-- ทำให้ปุ่มสามารถลากไปมาได้
+local dragging = false
+local dragInput, mousePos, framePos
+
+ToggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        mousePos = input.Position
+        framePos = ToggleBtn.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+ToggleBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - mousePos
+        ToggleBtn.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ระบบแยกแยะระหว่างการลาก กับ การแตะ (กันปุ่มลั่นตอนลาก)
+local dragStartPos = nil
+ToggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragStartPos = input.Position
+    end
+end)
+
+ToggleBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if dragStartPos and (input.Position - dragStartPos).Magnitude < 10 then
+            local vim = game:GetService("VirtualInputManager")
+            vim:SendKeyEvent(true, Enum.KeyCode.LeftControl, false, game)
+            task.wait()
+            vim:SendKeyEvent(false, Enum.KeyCode.LeftControl, false, game)
+        end
+    end
+end)
 
 -- ==========================================
 -- [Dynamic Path Fetching] 
@@ -70,9 +160,7 @@ local AutoJoinTime = false
 local AutoLeaveWave = false
 local TargetLeaveWave = 10
 local LastJoinMinute = -1
-
 local IsJoiningTrial = false
-local JoinTrialTimeout = 0 -- [NEW] ตัวนับเวลาล็อคหน้าประตู
 local wasInTrial = false 
 
 local SelectedNoobToEnchant = nil
@@ -366,14 +454,11 @@ local function checkAutoJoinTime(char)
             
         if touchPart then
             IsJoiningTrial = true
-            JoinTrialTimeout = os.time() + 45 -- ให้เวลายืนรอหน้าประตู 45 วินาที
             char:PivotTo(touchPart.CFrame)
             
-            Fluent:Notify({
-                Title = "Auto Trial",
-                Content = "Teleporting to Trial door... Waiting to start.",
-                Duration = 5
-            })
+            task.delay(5, function()
+                IsJoiningTrial = false
+            end)
         end
     end
 end
@@ -808,7 +893,8 @@ task.spawn(function()
         checkAutoJoinTime(char)
         checkAutoLeaveWave()
 
-        -- [NEW] ตรวจสอบหน้าต่าง Trial แบบ Real-time
+        if IsJoiningTrial then continue end
+
         local currentlyInTrial = false
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
         if playerGui then
@@ -821,17 +907,6 @@ task.spawn(function()
             end
         end
 
-        -- [NEW LOGIC] ระบบรอหน้าประตูดันเจี้ยน
-        if IsJoiningTrial then
-            if currentlyInTrial or os.time() > JoinTrialTimeout then
-                IsJoiningTrial = false -- หมดเวลารอ หรือ เข้าห้องสำเร็จแล้ว
-            else
-                -- หากยังรอหน้าประตู ให้ข้ามการวาร์ปฟาร์มมอน/แร่ทิ้งทั้งหมด เพื่อไม่ให้กระชากตัวละคร
-                continue 
-            end
-        end
-
-        -- [LOGIC] Post-Trial Capsule Auto Return
         if wasInTrial and not currentlyInTrial then
             if AutoCapsule and SelectedCapsule then
                 local gc = getGameContent()
