@@ -70,7 +70,9 @@ local AutoJoinTime = false
 local AutoLeaveWave = false
 local TargetLeaveWave = 10
 local LastJoinMinute = -1
+
 local IsJoiningTrial = false
+local JoinTrialTimeout = 0 -- [NEW] ตัวนับเวลาล็อคหน้าประตู
 local wasInTrial = false 
 
 local SelectedNoobToEnchant = nil
@@ -138,14 +140,12 @@ local function simulateButtonClick(button)
 end
 
 -- ==========================================
--- [Helper Functions] Movement & Anti-Stuck [NEW]
+-- [Helper Functions] Movement & Anti-Stuck 
 -- ==========================================
 local function doWiggle(char)
     if char and char:FindFirstChild("HumanoidRootPart") then
         local hrp = char.HumanoidRootPart
-        -- สุ่มขยับซ้ายขวาหน้าหลัง 2-4 หน่วย
         hrp.CFrame = hrp.CFrame * CFrame.new(math.random(-3, 3), 0, math.random(-3, 3))
-        -- สร้างแรงดันให้ตัวลอยนิดนึงเพื่อรีเซ็ตสถานะ
         hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0)
     end
 end
@@ -155,9 +155,7 @@ local function smartTeleport(char, target)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if hrp then
         local targetCFrame = target:GetPivot()
-        -- ถอยออกจากจุดกึ่งกลาง 4 หน่วย ป้องกันบัคสิงร่าง
         local offsetCFrame = targetCFrame * CFrame.new(0, 0, 4)
-        -- หันหน้าเข้าหาเป้าหมายเสมอ
         char:PivotTo(CFrame.new(offsetCFrame.Position, targetCFrame.Position))
     end
 end
@@ -368,11 +366,14 @@ local function checkAutoJoinTime(char)
             
         if touchPart then
             IsJoiningTrial = true
+            JoinTrialTimeout = os.time() + 45 -- ให้เวลายืนรอหน้าประตู 45 วินาที
             char:PivotTo(touchPart.CFrame)
             
-            task.delay(5, function()
-                IsJoiningTrial = false
-            end)
+            Fluent:Notify({
+                Title = "Auto Trial",
+                Content = "Teleporting to Trial door... Waiting to start.",
+                Duration = 5
+            })
         end
     end
 end
@@ -807,8 +808,7 @@ task.spawn(function()
         checkAutoJoinTime(char)
         checkAutoLeaveWave()
 
-        if IsJoiningTrial then continue end
-
+        -- [NEW] ตรวจสอบหน้าต่าง Trial แบบ Real-time
         local currentlyInTrial = false
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
         if playerGui then
@@ -818,6 +818,16 @@ task.spawn(function()
                 
             if trialUI and trialUI.Visible then
                 currentlyInTrial = true
+            end
+        end
+
+        -- [NEW LOGIC] ระบบรอหน้าประตูดันเจี้ยน
+        if IsJoiningTrial then
+            if currentlyInTrial or os.time() > JoinTrialTimeout then
+                IsJoiningTrial = false -- หมดเวลารอ หรือ เข้าห้องสำเร็จแล้ว
+            else
+                -- หากยังรอหน้าประตู ให้ข้ามการวาร์ปฟาร์มมอน/แร่ทิ้งทั้งหมด เพื่อไม่ให้กระชากตัวละคร
+                continue 
             end
         end
 
@@ -866,7 +876,6 @@ task.spawn(function()
                             break 
                         end
                         
-                        -- Anti-Stuck Check (ถ้าเลือดเท่าเดิมนาน 3.5 วินาที ให้ขยับตัว)
                         if hpText == lastHpText then
                             stuckTimer = stuckTimer + task.wait()
                             if stuckTimer > 3.5 then
