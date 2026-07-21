@@ -7,7 +7,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
-local MainRemote = ReplicatedStorage:WaitForChild("__Net"):WaitForChild("MainRemote")
+local NetFolder = ReplicatedStorage:WaitForChild("__Net", 10)
+local MainRemote = NetFolder and NetFolder:WaitForChild("MainRemote", 10)
 
 local Window = Fluent:CreateWindow({
     Title = "Noob INC.",
@@ -24,22 +25,43 @@ local Tabs = {
     Main = Window:AddTab({ Title = "Mob Farm", Icon = "swords" }),
     Enchant = Window:AddTab({ Title = "Enchant", Icon = "sparkles" }),
     Chest = Window:AddTab({ Title = "Chest", Icon = "box" }),
+    Capsule = Window:AddTab({ Title = "Capsule", Icon = "egg" }), -- [NEW] Capsule Tab
     EasyTrial = Window:AddTab({ Title = "Easy Trial", Icon = "shield" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "map-pin" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
 -- ==========================================
+-- [Dynamic Path Fetching] ป้องกัน Infinite Yield
+-- ==========================================
+local function getGameContent()
+    return workspace:FindFirstChild("__GAME_CONTENT")
+end
+
+local function getMobsFolder()
+    local gc = getGameContent()
+    return gc and gc:FindFirstChild("Mobs")
+end
+
+local function getOresFolder()
+    local gc = getGameContent()
+    return gc and gc:FindFirstChild("Ores")
+end
+
+local function getNoobsFolder()
+    local gc = getGameContent()
+    return gc and gc:FindFirstChild("Noobs")
+end
+
+-- ==========================================
 -- [Variables]
 -- ==========================================
-local mobsPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Mobs")
-local oresPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Ores")
-local noobsPath = workspace:WaitForChild("__GAME_CONTENT"):WaitForChild("Noobs")
-
 local SelectedOres = {}
 local AutoMine = false
 
 local SelectedMobs = {}
 local AutoTeleport = false
+local AutoSpiritRitual = false
 
 local AutoEasyTrial = false
 local AutoJoinTime = false
@@ -47,6 +69,7 @@ local AutoLeaveWave = false
 local TargetLeaveWave = 10
 local LastJoinMinute = -1
 local IsJoiningTrial = false
+local wasInTrial = false -- [NEW] Tracker for Trial completion
 
 local SelectedNoobToEnchant = nil
 local AutoEnchant = false
@@ -65,6 +88,18 @@ local AutoOpenChest = false
 local AvailableChests = {"Chest", "GoldenChest", "T1TrialChest", "T2TrialChest"}
 local AvailableAmounts = {"1", "5", "10", "25", "100"}
 
+local SavedPosition = nil
+local ReturnToSavedPosition = false
+
+local SelectedCapsule = nil
+local AutoCapsule = false
+
+-- Ritual Status Variables
+local RitualState = "Idle"
+local RitualEndTime = 0
+local CooldownEndTime = 0
+local RitualKills = 0
+
 -- ==========================================
 -- [Anti-AFK System] Ultimate Cloud Phone Bypass
 -- ==========================================
@@ -82,6 +117,21 @@ task.spawn(function()
         VirtualUser:ClickButton2(Vector2.new())
     end)
 end)
+
+-- ==========================================
+-- [Helper Functions] Check Targets from Multi-Dropdown
+-- ==========================================
+local function isTargetSelected(targetMap, name)
+    if not targetMap then return false end
+    if type(targetMap) == "string" then return targetMap == name end
+    if type(targetMap) == "table" then
+        if targetMap[name] then return true end
+        for k, v in pairs(targetMap) do
+            if type(k) == "number" and v == name then return true end
+        end
+    end
+    return false
+end
 
 -- ==========================================
 -- [Helper Functions] GUI Click Simulator
@@ -156,10 +206,11 @@ local function parseMaxHPFromText(hpText)
     return 0
 end
 
-local function getEntityMaxHP(targetName, parentPath)
+local function getEntityMaxHP(targetName, parentFolder)
+    if not parentFolder then return math.huge end
     local highestFound = 0
     
-    for _, entity in ipairs(parentPath:GetChildren()) do
+    for _, entity in ipairs(parentFolder:GetChildren()) do
         if entity.Name == targetName then
             local hpText = getEntityHealth(entity)
             if hpText and not string.find(tostring(hpText), "Respawning") then
@@ -174,14 +225,15 @@ local function getEntityMaxHP(targetName, parentPath)
     return highestFound > 0 and highestFound or math.huge 
 end
 
-local function getUniqueEntitiesSorted(parentPath)
+local function getUniqueEntitiesSorted(parentFolder)
+    if not parentFolder then return {} end
     local uniqueCheck = {}
     local dataList = {}
     
-    for _, entity in ipairs(parentPath:GetChildren()) do
+    for _, entity in ipairs(parentFolder:GetChildren()) do
         if not uniqueCheck[entity.Name] then
             uniqueCheck[entity.Name] = true
-            local maxHpValue = getEntityMaxHP(entity.Name, parentPath)
+            local maxHpValue = getEntityMaxHP(entity.Name, parentFolder)
             table.insert(dataList, {
                 Name = entity.Name,
                 MaxHP = maxHpValue
@@ -213,13 +265,14 @@ local function isEntityDead(hpText)
 end
 
 local function getValidOre(targetNamesMap)
-    if not targetNamesMap or type(targetNamesMap) ~= "table" then return nil end
+    local oresFolder = getOresFolder()
+    if not oresFolder or type(targetNamesMap) ~= "table" then return nil end
     
     local bestOre = nil
     local highestHP = -1
     
-    for _, ore in ipairs(oresPath:GetChildren()) do
-        if targetNamesMap[ore.Name] then
+    for _, ore in ipairs(oresFolder:GetChildren()) do
+        if isTargetSelected(targetNamesMap, ore.Name) then
             local hpText = getEntityHealth(ore)
             if not isEntityDead(hpText) then
                 local currentMaxHP = parseMaxHPFromText(hpText)
@@ -235,13 +288,14 @@ local function getValidOre(targetNamesMap)
 end
 
 local function getValidMob(targetNamesMap)
-    if not targetNamesMap or type(targetNamesMap) ~= "table" then return nil end
+    local mobsFolder = getMobsFolder()
+    if not mobsFolder or type(targetNamesMap) ~= "table" then return nil end
     
     local bestMob = nil
     local highestHP = -1
     
-    for _, mob in ipairs(mobsPath:GetChildren()) do
-        if targetNamesMap[mob.Name] then
+    for _, mob in ipairs(mobsFolder:GetChildren()) do
+        if isTargetSelected(targetNamesMap, mob.Name) then
             local hpText = getEntityHealth(mob)
             if not isEntityDead(hpText) then
                 local currentMaxHP = parseMaxHPFromText(hpText)
@@ -257,10 +311,10 @@ local function getValidMob(targetNamesMap)
 end
 
 local function getValidTrialMob()
-    local content = workspace:FindFirstChild("__GAME_CONTENT")
-    if not content then return nil end
+    local gc = getGameContent()
+    if not gc then return nil end
     
-    local trials = content:FindFirstChild("Trials")
+    local trials = gc:FindFirstChild("Trials")
     if not trials then return nil end
     
     local easyRoom = trials:FindFirstChild("EasyTrialRoom")
@@ -288,11 +342,11 @@ local function checkAutoJoinTime(char)
     if ((min == 29 and sec >= 30) or (min == 59 and sec >= 30)) and min ~= LastJoinMinute then
         LastJoinMinute = min 
         
-        local touchPart = workspace:FindFirstChild("__GAME_CONTENT")
-            and workspace.__GAME_CONTENT:FindFirstChild("Trials")
-            and workspace.__GAME_CONTENT.Trials:FindFirstChild("EasyTrialRoom")
-            and workspace.__GAME_CONTENT.Trials.EasyTrialRoom:FindFirstChild("__TrialEasyRoom")
-            and workspace.__GAME_CONTENT.Trials.EasyTrialRoom.__TrialEasyRoom:FindFirstChild("TouchPart")
+        local touchPart = getGameContent()
+            and getGameContent():FindFirstChild("Trials")
+            and getGameContent().Trials:FindFirstChild("EasyTrialRoom")
+            and getGameContent().Trials.EasyTrialRoom:FindFirstChild("__TrialEasyRoom")
+            and getGameContent().Trials.EasyTrialRoom.__TrialEasyRoom:FindFirstChild("TouchPart")
             
         if touchPart then
             IsJoiningTrial = true
@@ -322,23 +376,49 @@ local function checkAutoLeaveWave()
         local currentWave = tonumber(string.match(waveText, "%d+")) 
         
         if currentWave and currentWave >= TargetLeaveWave then
-            MainRemote:FireServer("LeaveTrial")
-            AutoLeaveWave = false 
-            Fluent:Notify({
-                Title = "Auto Leave",
-                Content = "Left the trial at wave " .. tostring(currentWave),
-                Duration = 3
-            })
+            if MainRemote then
+                MainRemote:FireServer("LeaveTrial")
+                AutoLeaveWave = false 
+                Fluent:Notify({
+                    Title = "Auto Leave",
+                    Content = "Left the trial at wave " .. tostring(currentWave),
+                    Duration = 3
+                })
+            end
         end
     end
+end
+
+-- ==========================================
+-- [Helper Functions] Capsule
+-- ==========================================
+local function getAvailableCapsules()
+    local list = {}
+    local gc = getGameContent()
+    if gc then
+        local uiZones = gc:FindFirstChild("UIZones")
+        if uiZones then
+            for _, zone in ipairs(uiZones:GetChildren()) do
+                if string.find(zone.Name, "Capsule") then
+                    -- Extract the name by removing "__Capsule" (e.g. "__CapsuleSuper" -> "Super")
+                    local cleanName = string.gsub(zone.Name, "__Capsule", "")
+                    table.insert(list, cleanName)
+                end
+            end
+        end
+    end
+    return list
 end
 
 -- ==========================================
 -- [Helper Functions] Enchant 
 -- ==========================================
 local function getOwnedNoobs()
+    local noobsFolder = getNoobsFolder()
+    if not noobsFolder then return {} end
+    
     local noobList = {}
-    for _, noob in ipairs(noobsPath:GetChildren()) do
+    for _, noob in ipairs(noobsFolder:GetChildren()) do
         table.insert(noobList, noob.Name)
     end
     return noobList
@@ -374,7 +454,7 @@ end
 local OreDropdown = Tabs.Mine:AddDropdown("OreDropdown", {
     Title = "Select Ores (Multi-Select)",
     Description = "Highest HP selected will be prioritized automatically.",
-    Values = getUniqueEntitiesSorted(oresPath),
+    Values = getUniqueEntitiesSorted(getOresFolder()),
     Multi = true,
     Default = {},
 })
@@ -386,7 +466,7 @@ end)
 Tabs.Mine:AddButton({
     Title = "Refresh Ore List",
     Callback = function()
-        OreDropdown:SetValues(getUniqueEntitiesSorted(oresPath))
+        OreDropdown:SetValues(getUniqueEntitiesSorted(getOresFolder()))
     end
 })
 
@@ -405,7 +485,7 @@ end)
 local MobDropdown = Tabs.Main:AddDropdown("MobDropdown", {
     Title = "Select Mobs (Multi-Select)",
     Description = "Highest HP selected will be prioritized automatically.",
-    Values = getUniqueEntitiesSorted(mobsPath),
+    Values = getUniqueEntitiesSorted(getMobsFolder()),
     Multi = true,
     Default = {},
 })
@@ -417,7 +497,7 @@ end)
 Tabs.Main:AddButton({
     Title = "Refresh Mob List",
     Callback = function()
-        MobDropdown:SetValues(getUniqueEntitiesSorted(mobsPath))
+        MobDropdown:SetValues(getUniqueEntitiesSorted(getMobsFolder()))
     end
 })
 
@@ -429,6 +509,21 @@ local TeleportToggle = Tabs.Main:AddToggle("TeleportToggle", {
 TeleportToggle:OnChanged(function(Value)
     AutoTeleport = Value
 end)
+
+local RitualToggle = Tabs.Main:AddToggle("RitualToggle", {
+    Title = "Auto Spirit Ritual",
+    Description = "Starts the 2-minute ritual and waits 35s for cooldown automatically.",
+    Default = false
+})
+
+RitualToggle:OnChanged(function(Value)
+    AutoSpiritRitual = Value
+end)
+
+local RitualStatus = Tabs.Main:AddParagraph({
+    Title = "Spirit Ritual Status",
+    Content = "Status: Idle\nKills: 0\nTime Left: 0s"
+})
 
 -- ==========================================
 -- UI Component: Enchant Tab
@@ -507,6 +602,41 @@ ChestToggle:OnChanged(function(Value)
 end)
 
 -- ==========================================
+-- UI Component: Capsule Tab [NEW]
+-- ==========================================
+Tabs.Capsule:AddParagraph({
+    Title = "Auto Capsule Setup",
+    Content = "Select a capsule. The bot will automatically warp to this capsule and open it 3 seconds AFTER returning from a Trial."
+})
+
+local CapsuleDropdown = Tabs.Capsule:AddDropdown("CapsuleDropdown", {
+    Title = "Select Capsule",
+    Values = getAvailableCapsules(),
+    Multi = false,
+    Default = 1,
+})
+
+CapsuleDropdown:OnChanged(function(Value)
+    SelectedCapsule = Value
+end)
+
+Tabs.Capsule:AddButton({
+    Title = "Refresh Capsules",
+    Callback = function()
+        CapsuleDropdown:SetValues(getAvailableCapsules())
+    end
+})
+
+local AutoCapsuleToggle = Tabs.Capsule:AddToggle("AutoCapsuleToggle", {
+    Title = "Auto Return & Open Capsule (Post-Trial)",
+    Default = false
+})
+
+AutoCapsuleToggle:OnChanged(function(Value)
+    AutoCapsule = Value
+end)
+
+-- ==========================================
 -- UI Component: Easy Trial Tab
 -- ==========================================
 local TrialJoinToggle = Tabs.EasyTrial:AddToggle("TrialJoinToggle", {
@@ -547,6 +677,51 @@ TrialLeaveToggle:OnChanged(function(Value)
 end)
 
 -- ==========================================
+-- UI Component: Misc Tab (Position Manager)
+-- ==========================================
+Tabs.Misc:AddParagraph({
+    Title = "Position Manager",
+    Content = "Save your position for opening eggs or runes. The bot will return here after trials or when idle."
+})
+
+Tabs.Misc:AddButton({
+    Title = "Save Current Position",
+    Description = "Saves where you are standing right now.",
+    Callback = function()
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            SavedPosition = char.HumanoidRootPart.CFrame
+            Fluent:Notify({
+                Title = "Position Saved",
+                Content = "Successfully saved your current location.",
+                Duration = 3
+            })
+        end
+    end
+})
+
+Tabs.Misc:AddButton({
+    Title = "Clear Saved Position",
+    Callback = function()
+        SavedPosition = nil
+        Fluent:Notify({
+            Title = "Position Cleared",
+            Content = "Your saved location has been removed.",
+            Duration = 3
+        })
+    end
+})
+
+local ReturnPositionToggle = Tabs.Misc:AddToggle("ReturnPositionToggle", {
+    Title = "Auto Return to Saved Position",
+    Default = false
+})
+
+ReturnPositionToggle:OnChanged(function(Value)
+    ReturnToSavedPosition = Value
+end)
+
+-- ==========================================
 -- UI Component: Settings Tab & Interface Manager
 -- ==========================================
 Tabs.Settings:AddParagraph({
@@ -557,20 +732,15 @@ Tabs.Settings:AddParagraph({
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 
--- Build settings UI
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({})
 
 InterfaceManager:SetFolder("NoobINC")
 SaveManager:SetFolder("NoobINC/config")
 
-InterfaceManager:SetWindow(Window)
-SaveManager:SetWindow(Window)
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
 
--- Auto load config if available
 SaveManager:LoadAutoloadConfig()
 
 -- ==========================================
@@ -586,44 +756,102 @@ task.spawn(function()
 
         if IsJoiningTrial then continue end
 
-        local targetTrialMob = nil
-        if AutoEasyTrial then
-            targetTrialMob = getValidTrialMob()
+        local currentlyInTrial = false
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if playerGui then
+            local trialUI = playerGui:FindFirstChild("FullScreen")
+                and playerGui.FullScreen:FindFirstChild("Popups")
+                and playerGui.FullScreen.Popups:FindFirstChild("TrialUI")
+                
+            if trialUI and trialUI.Visible then
+                currentlyInTrial = true
+            end
         end
 
-        if targetTrialMob then
-            char:PivotTo(targetTrialMob:GetPivot())
+        -- [NEW LOGIC] Post-Trial Capsule Auto Return
+        if wasInTrial and not currentlyInTrial then
+            if AutoCapsule and SelectedCapsule then
+                local gc = getGameContent()
+                if gc then
+                    local uiZones = gc:FindFirstChild("UIZones")
+                    if uiZones then
+                        -- ค้นหาโฟลเดอร์หรือพาร์ทโซนตามชื่อที่เลือก (รองรับทั้งที่มีและไม่มีคำว่า __Capsule)
+                        local targetZone = uiZones:FindFirstChild("__Capsule" .. SelectedCapsule) or uiZones:FindFirstChild(SelectedCapsule)
+                        if targetZone then
+                            char:PivotTo(targetZone:GetPivot())
+                            task.wait(3) -- หน่วงเวลา 3 วินาทีหลังจากกลับมาจาก Trial
+                            
+                            if MainRemote then
+                                MainRemote:FireServer("ToggleMinionAutoOpen", SelectedCapsule)
+                                Fluent:Notify({
+                                    Title = "Auto Capsule",
+                                    Content = "Fired Remote: " .. SelectedCapsule,
+                                    Duration = 3
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        wasInTrial = currentlyInTrial
+
+        -- หากอยู่ใน Trial ให้โจมตีให้เสร็จก่อน และระงับฟาร์มนอกห้อง
+        if currentlyInTrial and AutoEasyTrial then
+            local targetTrialMob = getValidTrialMob()
+            if targetTrialMob then
+                char:PivotTo(targetTrialMob:GetPivot())
+                
+                while AutoEasyTrial and targetTrialMob.Parent do
+                    local hpText = getEntityHealth(targetTrialMob)
+                    if isEntityDead(hpText) then 
+                        if RitualState == "Active" then
+                            RitualKills = RitualKills + 1
+                        end
+                        break 
+                    end
+                    task.wait()
+                end
+            end
+            continue
+        end
+
+        local targetOre = nil
+        if AutoMine and SelectedOres then
+            targetOre = getValidOre(SelectedOres)
+        end
+
+        local targetMob = nil
+        if AutoTeleport and SelectedMobs then
+            targetMob = getValidMob(SelectedMobs)
+        end
+
+        if targetOre then
+            char:PivotTo(targetOre:GetPivot())
             
-            while AutoEasyTrial and targetTrialMob.Parent do
-                local hpText = getEntityHealth(targetTrialMob)
+            while AutoMine and targetOre.Parent do
+                local hpText = getEntityHealth(targetOre)
                 if isEntityDead(hpText) then break end
                 task.wait()
             end
-            
-        elseif AutoMine and SelectedOres then
-            local targetOre = getValidOre(SelectedOres)
-            
-            if targetOre then
-                char:PivotTo(targetOre:GetPivot())
-                
-                while AutoMine and targetOre.Parent do
-                    local hpText = getEntityHealth(targetOre)
-                    if isEntityDead(hpText) then break end
-                    task.wait()
-                end
-            end
 
-        elseif AutoTeleport and SelectedMobs then
-            local targetMob = getValidMob(SelectedMobs)
+        elseif targetMob then
+            char:PivotTo(targetMob:GetPivot())
             
-            if targetMob then
-                char:PivotTo(targetMob:GetPivot())
-                
-                while AutoTeleport and targetMob.Parent do
-                    local hpText = getEntityHealth(targetMob)
-                    if isEntityDead(hpText) then break end
-                    task.wait()
+            while AutoTeleport and targetMob.Parent do
+                local hpText = getEntityHealth(targetMob)
+                if isEntityDead(hpText) then 
+                    if RitualState == "Active" then
+                        RitualKills = RitualKills + 1
+                    end
+                    break 
                 end
+                task.wait()
+            end
+            
+        elseif ReturnToSavedPosition and SavedPosition then
+            if (char.HumanoidRootPart.Position - SavedPosition.Position).Magnitude > 5 then
+                char:PivotTo(SavedPosition)
             end
         end
     end
@@ -634,7 +862,7 @@ end)
 -- ==========================================
 task.spawn(function()
     while task.wait() do
-        if AutoEnchant and SelectedNoobToEnchant then
+        if AutoEnchant and SelectedNoobToEnchant and MainRemote then
             local currentWarningEnchant = getWarningEnchantName()
             
             if currentWarningEnchant then
@@ -679,8 +907,48 @@ end)
 -- ==========================================
 task.spawn(function()
     while task.wait(0.5) do
-        if AutoOpenChest and SelectedChest and SelectedChestAmount then
+        if AutoOpenChest and SelectedChest and SelectedChestAmount and MainRemote then
             MainRemote:FireServer("OpenChest", SelectedChest, SelectedChestAmount)
+        end
+    end
+end)
+
+-- ==========================================
+-- Main Loop 4: Auto Spirit Ritual & Status Update
+-- ==========================================
+task.spawn(function()
+    while task.wait(0.5) do
+        local currentTime = os.time()
+        
+        if AutoSpiritRitual then
+            if currentTime >= CooldownEndTime then
+                if MainRemote then
+                    MainRemote:FireServer("StartRitual")
+                end
+                RitualState = "Active"
+                RitualKills = 0
+                RitualEndTime = currentTime + 120
+                CooldownEndTime = RitualEndTime + 35
+                
+            elseif currentTime < RitualEndTime then
+                RitualState = "Active"
+            elseif currentTime < CooldownEndTime then
+                RitualState = "Cooldown"
+            end
+        else
+            RitualState = "Idle"
+        end
+        
+        if RitualState == "Idle" then
+            RitualStatus:SetDesc("Status: Idle\nKills: 0\nTime Left: 0s")
+        elseif RitualState == "Active" then
+            local timeLeft = RitualEndTime - currentTime
+            if timeLeft < 0 then timeLeft = 0 end
+            RitualStatus:SetDesc("Status: Active (Killing Mobs)\nKills: " .. tostring(RitualKills) .. "\nTime Left: " .. tostring(timeLeft) .. "s")
+        elseif RitualState == "Cooldown" then
+            local timeLeft = CooldownEndTime - currentTime
+            if timeLeft < 0 then timeLeft = 0 end
+            RitualStatus:SetDesc("Status: Cooldown\nKills: " .. tostring(RitualKills) .. " (Finished)\nTime Left: " .. tostring(timeLeft) .. "s")
         end
     end
 end)
