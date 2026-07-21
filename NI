@@ -21,18 +21,18 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Mine = Window:AddTab({ Title = "Mine", Icon = "pickaxe" }),
+    Mine = Window:AddTab({ Title = "Mine", Icon = "hammer" }), 
     Main = Window:AddTab({ Title = "Mob Farm", Icon = "swords" }),
-    Enchant = Window:AddTab({ Title = "Enchant", Icon = "sparkles" }),
+    Enchant = Window:AddTab({ Title = "Enchant", Icon = "wand" }), 
     Chest = Window:AddTab({ Title = "Chest", Icon = "box" }),
-    Capsule = Window:AddTab({ Title = "Capsule", Icon = "egg" }), -- [NEW] Capsule Tab
+    Capsule = Window:AddTab({ Title = "Capsule", Icon = "egg" }),
     EasyTrial = Window:AddTab({ Title = "Easy Trial", Icon = "shield" }),
     Misc = Window:AddTab({ Title = "Misc", Icon = "map-pin" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
 -- ==========================================
--- [Dynamic Path Fetching] ป้องกัน Infinite Yield
+-- [Dynamic Path Fetching] 
 -- ==========================================
 local function getGameContent()
     return workspace:FindFirstChild("__GAME_CONTENT")
@@ -63,13 +63,15 @@ local SelectedMobs = {}
 local AutoTeleport = false
 local AutoSpiritRitual = false
 
+local TeleportDelay = 0.2 
+
 local AutoEasyTrial = false
 local AutoJoinTime = false
 local AutoLeaveWave = false
 local TargetLeaveWave = 10
 local LastJoinMinute = -1
 local IsJoiningTrial = false
-local wasInTrial = false -- [NEW] Tracker for Trial completion
+local wasInTrial = false 
 
 local SelectedNoobToEnchant = nil
 local AutoEnchant = false
@@ -94,14 +96,15 @@ local ReturnToSavedPosition = false
 local SelectedCapsule = nil
 local AutoCapsule = false
 
--- Ritual Status Variables
 local RitualState = "Idle"
 local RitualEndTime = 0
 local CooldownEndTime = 0
 local RitualKills = 0
 
+local IsSyncingDelay = false 
+
 -- ==========================================
--- [Anti-AFK System] Ultimate Cloud Phone Bypass
+-- [Anti-AFK System] 
 -- ==========================================
 task.spawn(function()
     pcall(function()
@@ -119,7 +122,48 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- [Helper Functions] Check Targets from Multi-Dropdown
+-- [Helper Functions] GUI Click Simulator
+-- ==========================================
+local function simulateButtonClick(button)
+    if not button then return end
+    if getconnections then
+        for _, connection in ipairs(getconnections(button.MouseButton1Click)) do
+            if connection.Function then
+                connection:Fire()
+            end
+        end
+    elseif firesignal then
+        firesignal(button.MouseButton1Click)
+    end
+end
+
+-- ==========================================
+-- [Helper Functions] Movement & Anti-Stuck [NEW]
+-- ==========================================
+local function doWiggle(char)
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        local hrp = char.HumanoidRootPart
+        -- สุ่มขยับซ้ายขวาหน้าหลัง 2-4 หน่วย
+        hrp.CFrame = hrp.CFrame * CFrame.new(math.random(-3, 3), 0, math.random(-3, 3))
+        -- สร้างแรงดันให้ตัวลอยนิดนึงเพื่อรีเซ็ตสถานะ
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0)
+    end
+end
+
+local function smartTeleport(char, target)
+    if not char or not target then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local targetCFrame = target:GetPivot()
+        -- ถอยออกจากจุดกึ่งกลาง 4 หน่วย ป้องกันบัคสิงร่าง
+        local offsetCFrame = targetCFrame * CFrame.new(0, 0, 4)
+        -- หันหน้าเข้าหาเป้าหมายเสมอ
+        char:PivotTo(CFrame.new(offsetCFrame.Position, targetCFrame.Position))
+    end
+end
+
+-- ==========================================
+-- [Helper Functions] Universal Entity Farm
 -- ==========================================
 local function isTargetSelected(targetMap, name)
     if not targetMap then return false end
@@ -133,26 +177,6 @@ local function isTargetSelected(targetMap, name)
     return false
 end
 
--- ==========================================
--- [Helper Functions] GUI Click Simulator
--- ==========================================
-local function simulateButtonClick(button)
-    if not button then return end
-    
-    if getconnections then
-        for _, connection in ipairs(getconnections(button.MouseButton1Click)) do
-            if connection.Function then
-                connection:Fire()
-            end
-        end
-    elseif firesignal then
-        firesignal(button.MouseButton1Click)
-    end
-end
-
--- ==========================================
--- [Helper Functions] Universal Entity Farm (Mobs & Ores)
--- ==========================================
 local function getEntityHealth(entity)
     local oresUI = entity:FindFirstChild("OresTopUI")
     if oresUI then
@@ -202,7 +226,6 @@ local function parseMaxHPFromText(hpText)
         local mult = multipliers[suffix] or 1
         return val * mult
     end
-    
     return 0
 end
 
@@ -221,7 +244,6 @@ local function getEntityMaxHP(targetName, parentFolder)
             end
         end
     end
-    
     return highestFound > 0 and highestFound or math.huge 
 end
 
@@ -249,7 +271,6 @@ local function getUniqueEntitiesSorted(parentFolder)
     for _, data in ipairs(dataList) do
         table.insert(sortedNames, data.Name)
     end
-    
     return sortedNames
 end
 
@@ -260,7 +281,6 @@ local function isEntityDead(hpText)
     if string.find(text, "Respawning") then return true end
     if text == "0" or string.match(text, "^0[a-zA-Z]+$") then return true end
     if string.match(text, "^0%s*/") then return true end
-    
     return false
 end
 
@@ -283,7 +303,6 @@ local function getValidOre(targetNamesMap)
             end
         end
     end
-    
     return bestOre
 end
 
@@ -306,7 +325,6 @@ local function getValidMob(targetNamesMap)
             end
         end
     end
-    
     return bestMob
 end
 
@@ -389,9 +407,6 @@ local function checkAutoLeaveWave()
     end
 end
 
--- ==========================================
--- [Helper Functions] Capsule
--- ==========================================
 local function getAvailableCapsules()
     local list = {}
     local gc = getGameContent()
@@ -400,7 +415,6 @@ local function getAvailableCapsules()
         if uiZones then
             for _, zone in ipairs(uiZones:GetChildren()) do
                 if string.find(zone.Name, "Capsule") then
-                    -- Extract the name by removing "__Capsule" (e.g. "__CapsuleSuper" -> "Super")
                     local cleanName = string.gsub(zone.Name, "__Capsule", "")
                     table.insert(list, cleanName)
                 end
@@ -410,9 +424,6 @@ local function getAvailableCapsules()
     return list
 end
 
--- ==========================================
--- [Helper Functions] Enchant 
--- ==========================================
 local function getOwnedNoobs()
     local noobsFolder = getNoobsFolder()
     if not noobsFolder then return {} end
@@ -444,9 +455,72 @@ local function getWarningEnchantName()
             end
         end
     end
-    
     return nil
 end
+
+-- ==========================================
+-- UI Component: Settings Tab (Top Priority)
+-- ==========================================
+Tabs.Settings:AddParagraph({
+    Title = "⚡ Optimization & Teleport Settings",
+    Content = "Adjust the teleport delay to prevent glitching when changing targets. The server needs time to sync your position."
+})
+
+local TpDelaySlider = Tabs.Settings:AddSlider("TpDelaySlider", {
+    Title = "Teleport Delay (Slider)",
+    Description = "Slide to adjust the delay (Seconds).",
+    Default = 0.2,
+    Min = 0.01,
+    Max = 10.00,
+    Rounding = 2
+})
+
+local TpDelayInput = Tabs.Settings:AddInput("TpDelayInput", {
+    Title = "Teleport Delay (Manual Input)",
+    Description = "Type the exact delay number (e.g., 0.15)",
+    Default = "0.20",
+    Numeric = true,
+    Finished = true,
+    Callback = function(Value)
+        if IsSyncingDelay then return end 
+        
+        local num = tonumber(Value)
+        if num then
+            TeleportDelay = num
+            IsSyncingDelay = true
+            TpDelaySlider:SetValue(num)
+            IsSyncingDelay = false
+        end
+    end
+})
+
+TpDelaySlider:OnChanged(function(Value)
+    if IsSyncingDelay then return end 
+    
+    TeleportDelay = Value
+    IsSyncingDelay = true
+    TpDelayInput:SetValue(tostring(Value))
+    IsSyncingDelay = false
+end)
+
+Tabs.Settings:AddParagraph({
+    Title = "System Status",
+    Content = "Advanced Anti-AFK is ACTIVE. Cloud Phone optimization enabled."
+})
+
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+InterfaceManager:SetFolder("NoobINC")
+SaveManager:SetFolder("NoobINC/config")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+SaveManager:LoadAutoloadConfig()
 
 -- ==========================================
 -- UI Component: Mine Tab
@@ -602,7 +676,7 @@ ChestToggle:OnChanged(function(Value)
 end)
 
 -- ==========================================
--- UI Component: Capsule Tab [NEW]
+-- UI Component: Capsule Tab
 -- ==========================================
 Tabs.Capsule:AddParagraph({
     Title = "Auto Capsule Setup",
@@ -721,27 +795,6 @@ ReturnPositionToggle:OnChanged(function(Value)
     ReturnToSavedPosition = Value
 end)
 
--- ==========================================
--- UI Component: Settings Tab & Interface Manager
--- ==========================================
-Tabs.Settings:AddParagraph({
-    Title = "System Status",
-    Content = "Advanced Anti-AFK is ACTIVE. Cloud Phone optimization enabled."
-})
-
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-
-InterfaceManager:SetFolder("NoobINC")
-SaveManager:SetFolder("NoobINC/config")
-
-InterfaceManager:BuildInterfaceSection(Tabs.Settings)
-SaveManager:BuildConfigSection(Tabs.Settings)
-
-SaveManager:LoadAutoloadConfig()
 
 -- ==========================================
 -- Main Loop 1: Core Combat, Mining & Trial System
@@ -768,18 +821,17 @@ task.spawn(function()
             end
         end
 
-        -- [NEW LOGIC] Post-Trial Capsule Auto Return
+        -- [LOGIC] Post-Trial Capsule Auto Return
         if wasInTrial and not currentlyInTrial then
             if AutoCapsule and SelectedCapsule then
                 local gc = getGameContent()
                 if gc then
                     local uiZones = gc:FindFirstChild("UIZones")
                     if uiZones then
-                        -- ค้นหาโฟลเดอร์หรือพาร์ทโซนตามชื่อที่เลือก (รองรับทั้งที่มีและไม่มีคำว่า __Capsule)
                         local targetZone = uiZones:FindFirstChild("__Capsule" .. SelectedCapsule) or uiZones:FindFirstChild(SelectedCapsule)
                         if targetZone then
                             char:PivotTo(targetZone:GetPivot())
-                            task.wait(3) -- หน่วงเวลา 3 วินาทีหลังจากกลับมาจาก Trial
+                            task.wait(3) 
                             
                             if MainRemote then
                                 MainRemote:FireServer("ToggleMinionAutoOpen", SelectedCapsule)
@@ -796,21 +848,37 @@ task.spawn(function()
         end
         wasInTrial = currentlyInTrial
 
-        -- หากอยู่ใน Trial ให้โจมตีให้เสร็จก่อน และระงับฟาร์มนอกห้อง
+        -- == Trial Farming ==
         if currentlyInTrial and AutoEasyTrial then
             local targetTrialMob = getValidTrialMob()
             if targetTrialMob then
-                char:PivotTo(targetTrialMob:GetPivot())
-                
-                while AutoEasyTrial and targetTrialMob.Parent do
-                    local hpText = getEntityHealth(targetTrialMob)
-                    if isEntityDead(hpText) then 
-                        if RitualState == "Active" then
-                            RitualKills = RitualKills + 1
+                task.wait(TeleportDelay)
+                if targetTrialMob.Parent then
+                    smartTeleport(char, targetTrialMob)
+                    
+                    local lastHpText = getEntityHealth(targetTrialMob)
+                    local stuckTimer = 0
+                    
+                    while AutoEasyTrial and targetTrialMob.Parent do
+                        local hpText = getEntityHealth(targetTrialMob)
+                        if isEntityDead(hpText) then 
+                            if RitualState == "Active" then RitualKills = RitualKills + 1 end
+                            break 
                         end
-                        break 
+                        
+                        -- Anti-Stuck Check (ถ้าเลือดเท่าเดิมนาน 3.5 วินาที ให้ขยับตัว)
+                        if hpText == lastHpText then
+                            stuckTimer = stuckTimer + task.wait()
+                            if stuckTimer > 3.5 then
+                                doWiggle(char)
+                                stuckTimer = 0
+                            end
+                        else
+                            lastHpText = hpText
+                            stuckTimer = 0
+                            task.wait()
+                        end
                     end
-                    task.wait()
                 end
             end
             continue
@@ -826,29 +894,64 @@ task.spawn(function()
             targetMob = getValidMob(SelectedMobs)
         end
 
+        -- == Ore Mining ==
         if targetOre then
-            char:PivotTo(targetOre:GetPivot())
-            
-            while AutoMine and targetOre.Parent do
-                local hpText = getEntityHealth(targetOre)
-                if isEntityDead(hpText) then break end
-                task.wait()
+            task.wait(TeleportDelay)
+            if targetOre.Parent then
+                smartTeleport(char, targetOre)
+                
+                local lastHpText = getEntityHealth(targetOre)
+                local stuckTimer = 0
+                
+                while AutoMine and targetOre.Parent do
+                    local hpText = getEntityHealth(targetOre)
+                    if isEntityDead(hpText) then break end
+                    
+                    if hpText == lastHpText then
+                        stuckTimer = stuckTimer + task.wait()
+                        if stuckTimer > 3.5 then
+                            doWiggle(char)
+                            stuckTimer = 0
+                        end
+                    else
+                        lastHpText = hpText
+                        stuckTimer = 0
+                        task.wait()
+                    end
+                end
             end
 
+        -- == Mob Farming ==
         elseif targetMob then
-            char:PivotTo(targetMob:GetPivot())
-            
-            while AutoTeleport and targetMob.Parent do
-                local hpText = getEntityHealth(targetMob)
-                if isEntityDead(hpText) then 
-                    if RitualState == "Active" then
-                        RitualKills = RitualKills + 1
+            task.wait(TeleportDelay)
+            if targetMob.Parent then
+                smartTeleport(char, targetMob)
+                
+                local lastHpText = getEntityHealth(targetMob)
+                local stuckTimer = 0
+                
+                while AutoTeleport and targetMob.Parent do
+                    local hpText = getEntityHealth(targetMob)
+                    if isEntityDead(hpText) then 
+                        if RitualState == "Active" then RitualKills = RitualKills + 1 end
+                        break 
                     end
-                    break 
+                    
+                    if hpText == lastHpText then
+                        stuckTimer = stuckTimer + task.wait()
+                        if stuckTimer > 3.5 then
+                            doWiggle(char)
+                            stuckTimer = 0
+                        end
+                    else
+                        lastHpText = hpText
+                        stuckTimer = 0
+                        task.wait()
+                    end
                 end
-                task.wait()
             end
             
+        -- == Return to Saved Position ==
         elseif ReturnToSavedPosition and SavedPosition then
             if (char.HumanoidRootPart.Position - SavedPosition.Position).Magnitude > 5 then
                 char:PivotTo(SavedPosition)
