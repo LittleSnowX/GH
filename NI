@@ -34,7 +34,7 @@ local Tabs = {
 }
 
 -- ==========================================
--- [Mobile Toggle Button] ระบบปุ่มลอยสำหรับมือถือ (แก้บัครูปดำ)
+-- [Mobile Toggle Button] ระบบปุ่มลอยสำหรับมือถือ
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 local ToggleBtn = Instance.new("TextButton")
@@ -50,11 +50,11 @@ ToggleBtn.Parent = ScreenGui
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 ToggleBtn.Position = UDim2.new(0.1, 0, 0.1, 0)
 ToggleBtn.Size = UDim2.new(0, 50, 0, 50)
-ToggleBtn.Text = "⚡" -- ใช้ Emoji แทนการโหลดรูปภาพ โหลดติด 100%
+ToggleBtn.Text = "⚡" 
 ToggleBtn.TextSize = 25
 ToggleBtn.AutoButtonColor = false
 
-UICorner.CornerRadius = UDim.new(0.5, 0) -- ทำให้เป็นวงกลม
+UICorner.CornerRadius = UDim.new(0.5, 0) 
 UICorner.Parent = ToggleBtn
 
 UIStroke.Color = Color3.fromRGB(255, 255, 255)
@@ -62,7 +62,6 @@ UIStroke.Thickness = 2.5
 UIStroke.Transparency = 0.1
 UIStroke.Parent = ToggleBtn
 
--- ใส่ลูกเล่นไล่สี (Gradient) ให้ขอบปุ่มดูเป็นแนว Sci-fi/อวกาศ
 UIGradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
     ColorSequenceKeypoint.new(0.5, Color3.fromRGB(200, 100, 255)),
@@ -71,7 +70,6 @@ UIGradient.Color = ColorSequence.new{
 UIGradient.Rotation = 45
 UIGradient.Parent = UIStroke
 
--- ทำให้ปุ่มสามารถลากไปมาได้
 local dragging = false
 local dragInput, mousePos, framePos
 
@@ -102,7 +100,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- ระบบแยกแยะระหว่างการลาก กับ การแตะ (กันปุ่มลั่นตอนลาก)
 local dragStartPos = nil
 ToggleBtn.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -144,6 +141,29 @@ local function getNoobsFolder()
 end
 
 -- ==========================================
+-- [Realm & Capsule Mapping]
+-- ==========================================
+local currentRealm = "" 
+
+local CapsuleRealmMap = {
+    ["Classic"] = "Realm1",
+    ["Super"] = "Realm2",
+    ["Ancient"] = "Realm3",
+    ["Football"] = "FootballEvent"
+}
+local AvailableCapsules = {"Classic", "Super", "Ancient", "Football"}
+
+local function switchRealm(targetRealm)
+    if targetRealm and currentRealm ~= targetRealm then
+        if MainRemote then
+            MainRemote:FireServer("TeleportToArea", targetRealm)
+            currentRealm = targetRealm
+            task.wait(4) 
+        end
+    end
+end
+
+-- ==========================================
 -- [Variables]
 -- ==========================================
 local SelectedOres = {}
@@ -151,6 +171,7 @@ local AutoMine = false
 
 local SelectedMobs = {}
 local AutoTeleport = false
+local AutoBoss = false -- [NEW]
 local AutoSpiritRitual = false
 
 local TeleportDelay = 0.2 
@@ -161,6 +182,7 @@ local AutoLeaveWave = false
 local TargetLeaveWave = 10
 local LastJoinMinute = -1
 local IsJoiningTrial = false
+local JoinTrialTimeout = 0
 local wasInTrial = false 
 
 local SelectedNoobToEnchant = nil
@@ -181,6 +203,7 @@ local AvailableChests = {"Chest", "GoldenChest", "T1TrialChest", "T2TrialChest"}
 local AvailableAmounts = {"1", "5", "10", "25", "100"}
 
 local SavedPosition = nil
+local SavedRealm = nil
 local ReturnToSavedPosition = false
 
 local SelectedCapsule = nil
@@ -446,19 +469,24 @@ local function checkAutoJoinTime(char)
     if ((min == 29 and sec >= 30) or (min == 59 and sec >= 30)) and min ~= LastJoinMinute then
         LastJoinMinute = min 
         
-        local touchPart = getGameContent()
-            and getGameContent():FindFirstChild("Trials")
-            and getGameContent().Trials:FindFirstChild("EasyTrialRoom")
-            and getGameContent().Trials.EasyTrialRoom:FindFirstChild("__TrialEasyRoom")
-            and getGameContent().Trials.EasyTrialRoom.__TrialEasyRoom:FindFirstChild("TouchPart")
+        switchRealm("Realm3") 
+        
+        local gc = getGameContent()
+        local touchPart = gc and gc:FindFirstChild("Trials")
+            and gc.Trials:FindFirstChild("EasyTrialRoom")
+            and gc.Trials.EasyTrialRoom:FindFirstChild("__TrialEasyRoom")
+            and gc.Trials.EasyTrialRoom.__TrialEasyRoom:FindFirstChild("TouchPart")
             
         if touchPart then
             IsJoiningTrial = true
+            JoinTrialTimeout = os.time() + 45
             char:PivotTo(touchPart.CFrame)
             
-            task.delay(5, function()
-                IsJoiningTrial = false
-            end)
+            Fluent:Notify({
+                Title = "Auto Trial",
+                Content = "Teleporting to Trial door... Waiting to start.",
+                Duration = 5
+            })
         end
     end
 end
@@ -611,6 +639,11 @@ SaveManager:LoadAutoloadConfig()
 -- ==========================================
 -- UI Component: Mine Tab
 -- ==========================================
+Tabs.Mine:AddParagraph({
+    Title = "Note for Mining",
+    Content = "Ores are located in Realm 2. Enabling this will automatically switch your realm."
+})
+
 local OreDropdown = Tabs.Mine:AddDropdown("OreDropdown", {
     Title = "Select Ores (Multi-Select)",
     Description = "Highest HP selected will be prioritized automatically.",
@@ -642,6 +675,21 @@ end)
 -- ==========================================
 -- UI Component: Mob Farm Tab
 -- ==========================================
+Tabs.Main:AddParagraph({
+    Title = "Note for Mob Farming",
+    Content = "Mobs are located in Realm 3. Auto Teleport will switch your realm."
+})
+
+local BossToggle = Tabs.Main:AddToggle("BossToggle", {
+    Title = "Auto Boss (Supreme Shadow Lord)",
+    Description = "Auto spawns and farms the Supreme Shadow Lord in Realm 3.",
+    Default = false
+})
+
+BossToggle:OnChanged(function(Value)
+    AutoBoss = Value
+end)
+
 local MobDropdown = Tabs.Main:AddDropdown("MobDropdown", {
     Title = "Select Mobs (Multi-Select)",
     Description = "Highest HP selected will be prioritized automatically.",
@@ -771,7 +819,7 @@ Tabs.Capsule:AddParagraph({
 
 local CapsuleDropdown = Tabs.Capsule:AddDropdown("CapsuleDropdown", {
     Title = "Select Capsule",
-    Values = getAvailableCapsules(),
+    Values = AvailableCapsules,
     Multi = false,
     Default = 1,
 })
@@ -779,13 +827,6 @@ local CapsuleDropdown = Tabs.Capsule:AddDropdown("CapsuleDropdown", {
 CapsuleDropdown:OnChanged(function(Value)
     SelectedCapsule = Value
 end)
-
-Tabs.Capsule:AddButton({
-    Title = "Refresh Capsules",
-    Callback = function()
-        CapsuleDropdown:SetValues(getAvailableCapsules())
-    end
-})
 
 local AutoCapsuleToggle = Tabs.Capsule:AddToggle("AutoCapsuleToggle", {
     Title = "Auto Return & Open Capsule (Post-Trial)",
@@ -851,9 +892,10 @@ Tabs.Misc:AddButton({
         local char = LocalPlayer.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             SavedPosition = char.HumanoidRootPart.CFrame
+            SavedRealm = currentRealm 
             Fluent:Notify({
                 Title = "Position Saved",
-                Content = "Successfully saved your current location.",
+                Content = "Successfully saved your current location and realm.",
                 Duration = 3
             })
         end
@@ -864,6 +906,7 @@ Tabs.Misc:AddButton({
     Title = "Clear Saved Position",
     Callback = function()
         SavedPosition = nil
+        SavedRealm = nil
         Fluent:Notify({
             Title = "Position Cleared",
             Content = "Your saved location has been removed.",
@@ -881,7 +924,6 @@ ReturnPositionToggle:OnChanged(function(Value)
     ReturnToSavedPosition = Value
 end)
 
-
 -- ==========================================
 -- Main Loop 1: Core Combat, Mining & Trial System
 -- ==========================================
@@ -892,8 +934,6 @@ task.spawn(function()
 
         checkAutoJoinTime(char)
         checkAutoLeaveWave()
-
-        if IsJoiningTrial then continue end
 
         local currentlyInTrial = false
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -907,11 +947,24 @@ task.spawn(function()
             end
         end
 
+        if IsJoiningTrial then
+            if currentlyInTrial or os.time() > JoinTrialTimeout then
+                IsJoiningTrial = false 
+            else
+                continue 
+            end
+        end
+
         if wasInTrial and not currentlyInTrial then
             if AutoCapsule and SelectedCapsule then
+                local targetRealm = CapsuleRealmMap[SelectedCapsule]
+                if targetRealm then
+                    switchRealm(targetRealm)
+                end
+                
                 local gc = getGameContent()
                 if gc then
-                    local uiZones = gc:FindFirstChild("UIZones")
+                    local uiZones = gc:WaitForChild("UIZones", 3)
                     if uiZones then
                         local targetZone = uiZones:FindFirstChild("__Capsule" .. SelectedCapsule) or uiZones:FindFirstChild(SelectedCapsule)
                         if targetZone then
@@ -968,75 +1021,122 @@ task.spawn(function()
             continue
         end
 
-        local targetOre = nil
-        if AutoMine and SelectedOres then
-            targetOre = getValidOre(SelectedOres)
-        end
-
-        local targetMob = nil
-        if AutoTeleport and SelectedMobs then
-            targetMob = getValidMob(SelectedMobs)
-        end
-
-        -- == Ore Mining ==
-        if targetOre then
-            task.wait(TeleportDelay)
-            if targetOre.Parent then
-                smartTeleport(char, targetOre)
-                
-                local lastHpText = getEntityHealth(targetOre)
-                local stuckTimer = 0
-                
-                while AutoMine and targetOre.Parent do
-                    local hpText = getEntityHealth(targetOre)
-                    if isEntityDead(hpText) then break end
-                    
-                    if hpText == lastHpText then
-                        stuckTimer = stuckTimer + task.wait()
-                        if stuckTimer > 3.5 then
-                            doWiggle(char)
-                            stuckTimer = 0
+        -- == [NEW] Boss Farming ==
+        if AutoBoss then
+            switchRealm("Realm3") -- บอสเกิดที่ Realm 3 เสมอ
+            local mobsFolder = getMobsFolder()
+            if mobsFolder then
+                local bossModel = mobsFolder:FindFirstChild("Supreme Shadow Lord")
+                if not bossModel then
+                    -- หากไม่พบบอส ให้ทำการเสกใหม่
+                    if MainRemote then
+                        MainRemote:FireServer("SpawnAncientMob", "Supreme Shadow Lord")
+                    end
+                    task.wait(0.5) -- หน่วงเวลาเล็กน้อยรอเซิร์ฟเวอร์เสกบอส
+                else
+                    -- หากเจอบอสแล้ว ให้เข้าโจมตี
+                    task.wait(TeleportDelay)
+                    if bossModel.Parent then
+                        smartTeleport(char, bossModel)
+                        
+                        local lastHpText = getEntityHealth(bossModel)
+                        local stuckTimer = 0
+                        
+                        while AutoBoss and bossModel.Parent do
+                            local hpText = getEntityHealth(bossModel)
+                            if isEntityDead(hpText) then 
+                                if RitualState == "Active" then RitualKills = RitualKills + 1 end
+                                break 
+                            end
+                            
+                            if hpText == lastHpText then
+                                stuckTimer = stuckTimer + task.wait()
+                                if stuckTimer > 3.5 then
+                                    doWiggle(char)
+                                    stuckTimer = 0
+                                end
+                            else
+                                lastHpText = hpText
+                                stuckTimer = 0
+                                task.wait()
+                            end
                         end
-                    else
-                        lastHpText = hpText
-                        stuckTimer = 0
-                        task.wait()
+                    end
+                end
+            end
+            continue -- จบลูปของบอส และบังคับไม่ให้ไปตีมอนตัวอื่น
+        end
+
+        if AutoMine then
+            switchRealm("Realm2")
+            local targetOre = getValidOre(SelectedOres)
+            
+            if targetOre then
+                task.wait(TeleportDelay)
+                if targetOre.Parent then
+                    smartTeleport(char, targetOre)
+                    
+                    local lastHpText = getEntityHealth(targetOre)
+                    local stuckTimer = 0
+                    
+                    while AutoMine and targetOre.Parent do
+                        local hpText = getEntityHealth(targetOre)
+                        if isEntityDead(hpText) then break end
+                        
+                        if hpText == lastHpText then
+                            stuckTimer = stuckTimer + task.wait()
+                            if stuckTimer > 3.5 then
+                                doWiggle(char)
+                                stuckTimer = 0
+                            end
+                        else
+                            lastHpText = hpText
+                            stuckTimer = 0
+                            task.wait()
+                        end
                     end
                 end
             end
 
-        -- == Mob Farming ==
-        elseif targetMob then
-            task.wait(TeleportDelay)
-            if targetMob.Parent then
-                smartTeleport(char, targetMob)
-                
-                local lastHpText = getEntityHealth(targetMob)
-                local stuckTimer = 0
-                
-                while AutoTeleport and targetMob.Parent do
-                    local hpText = getEntityHealth(targetMob)
-                    if isEntityDead(hpText) then 
-                        if RitualState == "Active" then RitualKills = RitualKills + 1 end
-                        break 
-                    end
+        elseif AutoTeleport then
+            switchRealm("Realm3")
+            local targetMob = getValidMob(SelectedMobs)
+            
+            if targetMob then
+                task.wait(TeleportDelay)
+                if targetMob.Parent then
+                    smartTeleport(char, targetMob)
                     
-                    if hpText == lastHpText then
-                        stuckTimer = stuckTimer + task.wait()
-                        if stuckTimer > 3.5 then
-                            doWiggle(char)
-                            stuckTimer = 0
+                    local lastHpText = getEntityHealth(targetMob)
+                    local stuckTimer = 0
+                    
+                    while AutoTeleport and targetMob.Parent do
+                        local hpText = getEntityHealth(targetMob)
+                        if isEntityDead(hpText) then 
+                            if RitualState == "Active" then RitualKills = RitualKills + 1 end
+                            break 
                         end
-                    else
-                        lastHpText = hpText
-                        stuckTimer = 0
-                        task.wait()
+                        
+                        if hpText == lastHpText then
+                            stuckTimer = stuckTimer + task.wait()
+                            if stuckTimer > 3.5 then
+                                doWiggle(char)
+                                stuckTimer = 0
+                            end
+                        else
+                            lastHpText = hpText
+                            stuckTimer = 0
+                            task.wait()
+                        end
                     end
                 end
             end
             
         -- == Return to Saved Position ==
         elseif ReturnToSavedPosition and SavedPosition then
+            if SavedRealm then
+                switchRealm(SavedRealm)
+            end
             if (char.HumanoidRootPart.Position - SavedPosition.Position).Magnitude > 5 then
                 char:PivotTo(SavedPosition)
             end
