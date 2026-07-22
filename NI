@@ -171,7 +171,7 @@ local AutoMine = false
 
 local SelectedMobs = {}
 local AutoTeleport = false
-local AutoBoss = false -- [NEW]
+local AutoBoss = false 
 local AutoSpiritRitual = false
 
 local TeleportDelay = 0.2 
@@ -251,13 +251,14 @@ local function simulateButtonClick(button)
 end
 
 -- ==========================================
--- [Helper Functions] Movement & Anti-Stuck 
+-- [Helper Functions] Movement & Anti-Stuck (UPDATED & FIXED)
 -- ==========================================
 local function doWiggle(char)
     if char and char:FindFirstChild("HumanoidRootPart") then
         local hrp = char.HumanoidRootPart
-        hrp.CFrame = hrp.CFrame * CFrame.new(math.random(-3, 3), 0, math.random(-3, 3))
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 15, 0)
+        -- ใช้ Vector ธรรมดาขยับ ป้องกันการหลุดแมพ และกระโดดเบาๆ เพื่ออัปเดตสเตตัสให้เซิร์ฟเวอร์
+        hrp.CFrame = hrp.CFrame + Vector3.new(math.random(-2, 2), 1.5, math.random(-2, 2))
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
 end
 
@@ -265,9 +266,18 @@ local function smartTeleport(char, target)
     if not char or not target then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if hrp then
-        local targetCFrame = target:GetPivot()
-        local offsetCFrame = targetCFrame * CFrame.new(0, 0, 4)
-        char:PivotTo(CFrame.new(offsetCFrame.Position, targetCFrame.Position))
+        local tPos = target:GetPivot().Position
+        
+        -- ใช้พิกัด X/Z ห่างออกมา 2.5 หน่วย และยก Y สูงขึ้น 2.5 หน่วย เสมอ!
+        -- (การบวก Vector ตรงๆ จะไม่สนใจการหมุนของมอนสเตอร์ ทำให้ไม่ตกดิน/ทะลุกำแพงแน่นอน)
+        local safeOffset = tPos + Vector3.new(2.5, 2.5, 2.5)
+        
+        -- หันหน้าไปหาเป้าหมาย
+        char:PivotTo(CFrame.new(safeOffset, tPos))
+        
+        -- ดับเบิ้ลล็อคความเร็ว ป้องกันกระเด็นเวลาเกิดบัค Collision
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     end
 end
 
@@ -519,23 +529,6 @@ local function checkAutoLeaveWave()
             end
         end
     end
-end
-
-local function getAvailableCapsules()
-    local list = {}
-    local gc = getGameContent()
-    if gc then
-        local uiZones = gc:FindFirstChild("UIZones")
-        if uiZones then
-            for _, zone in ipairs(uiZones:GetChildren()) do
-                if string.find(zone.Name, "Capsule") then
-                    local cleanName = string.gsub(zone.Name, "__Capsule", "")
-                    table.insert(list, cleanName)
-                end
-            end
-        end
-    end
-    return list
 end
 
 local function getOwnedNoobs()
@@ -1021,20 +1014,18 @@ task.spawn(function()
             continue
         end
 
-        -- == [NEW] Boss Farming ==
+        -- == Boss Farming ==
         if AutoBoss then
-            switchRealm("Realm3") -- บอสเกิดที่ Realm 3 เสมอ
+            switchRealm("Realm3") 
             local mobsFolder = getMobsFolder()
             if mobsFolder then
                 local bossModel = mobsFolder:FindFirstChild("Supreme Shadow Lord")
                 if not bossModel then
-                    -- หากไม่พบบอส ให้ทำการเสกใหม่
                     if MainRemote then
                         MainRemote:FireServer("SpawnAncientMob", "Supreme Shadow Lord")
                     end
-                    task.wait(0.5) -- หน่วงเวลาเล็กน้อยรอเซิร์ฟเวอร์เสกบอส
+                    task.wait(0.5) 
                 else
-                    -- หากเจอบอสแล้ว ให้เข้าโจมตี
                     task.wait(TeleportDelay)
                     if bossModel.Parent then
                         smartTeleport(char, bossModel)
@@ -1064,7 +1055,7 @@ task.spawn(function()
                     end
                 end
             end
-            continue -- จบลูปของบอส และบังคับไม่ให้ไปตีมอนตัวอื่น
+            continue 
         end
 
         if AutoMine then
